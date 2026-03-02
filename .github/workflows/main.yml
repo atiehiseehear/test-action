@@ -37,15 +37,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr create \
+          PR_URL=$(gh pr create \
             --base master \
             --head ${{ steps.merge.outputs.branch_name }} \
             --title "chore: sync release into master" \
             --body "Automated sync of release into master." \
-            --label automated \
-            --json number \
-            --jq '.number' > pr_number.txt
-          echo "pull-request-number=$(cat pr_number.txt)" >> $GITHUB_OUTPUT
+            --label automated)
+          PR_NUMBER=$(echo $PR_URL | grep -oP '\d+$')
+          echo "pull-request-number=$PR_NUMBER" >> $GITHUB_OUTPUT
         id: cpr
 
       - name: Enable auto-merge
