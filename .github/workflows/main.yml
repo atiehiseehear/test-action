@@ -1,41 +1,51 @@
-name: Sync Release to Master (Auto)
+name: Sync Release to Master
 
 on:
   workflow_dispatch:
   push:
-    branches: [release]
+    branches: [release]   # optional: remove if you only want manual runs
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  sync:
+  sync_release_to_master:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout release
         uses: actions/checkout@v4
         with:
           ref: release
+          fetch-depth: 0
 
-      - name: Create PR from release snapshot -> master
+      - name: Create or update PR (bot branch -> master)
         id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
-          # Use a bot token (PAT or GitHub App token) if your rules are strict.
-          token: ${{ secrets.SYNC_BOT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+          # PR target
           base: master
-          branch: automation/release-to-master
+
+          # PR source (this is the IMPORTANT part: use branch:, not head:)
+          branch: bot/sync-release-to-master
+
           title: "chore: sync release into master"
           body: |
-            This PR is created from the current state of the release branch.
+            Automated sync PR created from the current state of the release branch.
           labels: automated
+
+          # Optional but nice:
           delete-branch: true
 
-      - name: Enable auto-merge (merges when checks/approvals pass)
+      - name: Enable auto-merge
         if: ${{ steps.cpr.outputs.pull-request-number != '' }}
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          token: ${{ secrets.SYNC_BOT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+
+          # IMPORTANT: must match what master allows (merge / squash / rebase)
           merge-method: merge
