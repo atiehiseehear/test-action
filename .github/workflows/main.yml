@@ -24,33 +24,27 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Create sync branch and merge release
-        id: merge
+      - name: Create temporary branch from master
+        id: create_temp_branch
         run: |
           BRANCH_NAME="sync-release-to-master-$(date +%s)"
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
           git checkout -b $BRANCH_NAME
-          git merge origin/release --no-edit
-          git push origin $BRANCH_NAME
 
-      - name: Create PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge release into temporary branch
         run: |
-          PR_URL=$(gh pr create \
-            --base master \
-            --head ${{ steps.merge.outputs.branch_name }} \
-            --title "chore: sync release into master" \
-            --body "Automated sync of release into master." \
-            --label automated)
-          PR_NUMBER=$(echo $PR_URL | grep -oP '\d+$')
-          echo "pull-request-number=$PR_NUMBER" >> $GITHUB_OUTPUT
-        id: cpr
+          git merge origin/release --no-edit
 
-      - name: Enable auto-merge
-        if: ${{ steps.cpr.outputs.pull-request-number != null && steps.cpr.outputs.pull-request-number != '' }}
-        uses: peter-evans/enable-pull-request-automerge@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
-          merge-method: merge
+      - name: Merge temporary branch into master
+        run: |
+          git checkout master
+          git merge ${{ steps.create_temp_branch.outputs.branch_name }} --no-edit
+
+      - name: Push changes to master
+        run: |
+          git push origin master
+
+      - name: Clean up temporary branch
+        if: always()
+        run: |
+          git push origin --delete ${{ steps.create_temp_branch.outputs.branch_name }} || true
