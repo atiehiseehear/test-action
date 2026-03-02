@@ -1,0 +1,89 @@
+name: Sync Release to Master
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync_release_to_master:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@v4
+        with:
+          ref: release
+          fetch-depth: 0
+      
+      - name: Setup GitHub CLI
+        run: |
+          # GitHub CLI is pre-installed on GitHub runners
+          gh --version
+
+      - name: Create sync branch from release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SYNC_BRANCH="bot/sync-release-to-master"
+
+          git checkout -B "$SYNC_BRANCH"
+
+          # Push sync branch (force is OK because it's a bot-owned branch)
+          git push -f origin "$SYNC_BRANCH"
+
+      - name: Create PR sync branch -> master
+        id: pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: master
+          head: bot/sync-release-to-master
+          title: "chore: sync release into master"
+          body: |
+            Automated sync PR created from release via bot branch.
+          labels: |
+            automated
+          delete-branch: true
+
+      - name: Wait for PR to be ready
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+        run: |
+          echo "PR created: #${{ steps.pr.outputs.pull-request-number }}"
+          echo "PR URL: ${{ steps.pr.outputs.pull-request-url }}"
+          
+      - name: Enable auto-merge
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.pr.outputs.pull-request-number }}
+          merge-method: merge
+
+      - name: Wait and check merge status
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+        run: |
+          # Wait for auto-merge to process
+          sleep 30
+          
+          # Check if PR was merged
+          PR_STATE=$(gh pr view ${{ steps.pr.outputs.pull-request-number }} --json state --jq '.state')
+          echo "PR State: $PR_STATE"
+          
+          if [ "$PR_STATE" = "MERGED" ]; then
+            echo "✅ PR successfully merged!"
+          else
+            echo "⚠️ PR not yet merged, attempting manual merge..."
+            
+            # Try to merge manually if auto-merge didn't work
+            gh pr merge ${{ steps.pr.outputs.pull-request-number }} --merge --delete-branch || {
+              echo "❌ Manual merge failed. There might be conflicts or branch protection rules."
+              echo "Please check the PR manually: ${{ steps.pr.outputs.pull-request-url }}"
+              exit 1
+            }
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

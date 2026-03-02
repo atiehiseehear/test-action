@@ -1,0 +1,56 @@
+name: Direct Sync Release to Master
+
+on:
+  workflow_dispatch:
+  # Uncomment the next lines to run automatically when release branch is updated
+  # push:
+  #   branches:
+  #     - release
+
+permissions:
+  contents: write
+
+jobs:
+  direct_sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check for differences between release and master
+        id: check_diff
+        run: |
+          git fetch origin release:release
+          git fetch origin master:master
+
+          if git diff --quiet release master; then
+            echo "No differences found between release and master"
+            echo "sync_needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Differences found between release and master"
+            echo "sync_needed=true" >> $GITHUB_OUTPUT
+            
+            echo "Commits in release but not in master:"
+            git log master..release --oneline
+          fi
+
+      - name: Sync release to master
+        if: steps.check_diff.outputs.sync_needed == 'true'
+        run: |
+          # Checkout master and merge release
+          git checkout master
+          git merge release --no-ff -m "chore: sync release to master [automated]"
+
+          # Push the updated master branch
+          git push origin master
+
+          echo "✅ Successfully synced release to master!"
