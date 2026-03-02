@@ -12,15 +12,21 @@ jobs:
     name: Merge release -> master
     runs-on: ubuntu-latest
     env:
-      # Prefer PAT (PR_AUTOMATION_TOKEN) if provided; otherwise fall back to GITHUB_TOKEN.
-      # Note: some orgs block PR creation with GITHUB_TOKEN, so PAT is recommended.
-      GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+      # Require PAT because GITHUB_TOKEN is blocked from creating PRs by org policy.
+      GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: release
+
+      - name: Validate PAT presence
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "PR_AUTOMATION_TOKEN is not set. Add a PAT with repo + pull_request write scopes." >&2
+            exit 1
+          fi
 
       - name: Ensure PR label exists
         run: |
