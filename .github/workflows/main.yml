@@ -2,50 +2,55 @@ name: Sync Release to Master
 
 on:
   workflow_dispatch:
-  push:
-    branches: [release]   # optional: remove if you only want manual runs
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  sync_release_to_master:
+  merge_release_to_master:
+    name: Merge release -> master
     runs-on: ubuntu-latest
+    env:
+      # Use a PAT secret; org policy blocks GITHUB_TOKEN from creating/merging PRs.
+      GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
 
     steps:
-      - name: Checkout release
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: release
-          fetch-depth: 0
 
-      - name: Create or update PR (bot branch -> master)
+      - name: Validate PAT presence
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "PR_AUTOMATION_TOKEN is not set. Add a PAT with repo + pull_request write scopes." >&2
+            exit 1
+          fi
+
+      - name: Ensure PR label exists
+        run: |
+          gh label create "automated" \
+            --color BFD4F2 \
+            --description "Automated PRs" || echo "Label already exists"
+
+      - name: Create PR release -> master
         id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-          # PR target
+          token: ${{ env.GH_TOKEN }}
           base: master
-
-          # PR source (this is the IMPORTANT part: use branch:, not head:)
           branch: bot/sync-release-to-master
-
-          title: "chore: sync release into master"
+          title: 'chore: sync release into master'
           body: |
-            Automated sync PR created from the current state of the release branch.
-          labels: automated
-
-          # Optional but nice:
-          delete-branch: true
+            Automated sync of release into master.
+          labels: |
+            automated
 
       - name: Enable auto-merge
-        if: ${{ steps.cpr.outputs.pull-request-number != '' }}
+        if: ${{ steps.cpr.outputs.pull-request-number != null && steps.cpr.outputs.pull-request-number != '' }}
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ env.GH_TOKEN }}
           pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
-
-          # IMPORTANT: must match what master allows (merge / squash / rebase)
           merge-method: merge
