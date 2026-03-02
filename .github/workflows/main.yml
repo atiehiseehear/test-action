@@ -1,57 +1,41 @@
-name: Sync Release to Master
+name: Sync Release to Master (Auto)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [release]
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  merge_release_to_master:
-    name: Merge release -> master
+  sync:
     runs-on: ubuntu-latest
-    env:
-      # Require PAT because GITHUB_TOKEN is blocked from creating PRs by org policy.
-      GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
-
     steps:
-      - name: Checkout code
+      - name: Checkout release
         uses: actions/checkout@v4
         with:
           ref: release
 
-      - name: Validate PAT presence
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "PR_AUTOMATION_TOKEN is not set. Add a PAT with repo + pull_request write scopes." >&2
-            exit 1
-          fi
+      - name: Create PR from release snapshot -> master
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          # Use a bot token (PAT or GitHub App token) if your rules are strict.
+          token: ${{ secrets.SYNC_BOT_TOKEN }}
+          base: master
+          branch: automation/release-to-master
+          title: "chore: sync release into master"
+          body: |
+            This PR is created from the current state of the release branch.
+          labels: automated
+          delete-branch: true
 
-      - name: Ensure PR label exists
-        run: |
-          gh label create "automated" \
-            --color BFD4F2 \
-            --description "Automated PRs" || echo "Label already exists"
-
-      - name: Create PR from release to master
-        id: create_pr
-        run: |
-          PR_URL=$(gh pr create \
-            --base master \
-            --head release \
-            --title "chore: sync release into master" \
-            --body "Automated sync of release into master after production deploy." \
-            --label "automated")
-
-          echo "Created PR: $PR_URL"
-          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
-
-      - name: Enable auto-merge for PR
-        run: |
-          PR_NUMBER=$(echo "${{ steps.create_pr.outputs.pr_url }}" | sed 's/.*\/pull\/\([0-9]*\)/\1/')
-          echo "PR Number: $PR_NUMBER"
-
-          # Enable auto-merge so the PR merges to master once checks pass.
-          gh pr merge "$PR_NUMBER" --auto --merge
-          echo "Auto-merge enabled for PR #$PR_NUMBER"
+      - name: Enable auto-merge (merges when checks/approvals pass)
+        if: ${{ steps.cpr.outputs.pull-request-number != '' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.SYNC_BOT_TOKEN }}
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: merge
