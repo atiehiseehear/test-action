@@ -1,0 +1,53 @@
+name: Sync Release to Master
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync_release_to_master:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@v4
+        with:
+          ref: release
+          fetch-depth: 0
+
+      - name: Create sync branch from release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SYNC_BRANCH="bot/sync-release-to-master"
+
+          git checkout -B "$SYNC_BRANCH"
+
+          # Push sync branch (force is OK because it's a bot-owned branch)
+          git push -f origin "$SYNC_BRANCH"
+
+      - name: Create PR sync branch -> master
+        id: pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: master
+          head: bot/sync-release-to-master
+          title: "chore: sync release into master"
+          body: |
+            Automated sync PR created from release via bot branch.
+          labels: |
+            automated
+          delete-branch: true
+
+      - name: Enable auto-merge (optional)
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.pr.outputs.pull-request-number }}
+          merge-method: merge
