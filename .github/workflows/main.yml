@@ -18,6 +18,14 @@ jobs:
         with:
           ref: release
 
+      - name: Ensure PR label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "automated" \
+            --color BFD4F2 \
+            --description "Automated PRs" || echo "Label already exists"
+
       - name: Create PR from release to master
         id: create_pr
         env:
