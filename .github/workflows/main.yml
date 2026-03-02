@@ -11,6 +11,10 @@ jobs:
   merge_release_to_master:
     name: Merge release -> master
     runs-on: ubuntu-latest
+    env:
+      # Prefer PAT (PR_AUTOMATION_TOKEN) if provided; otherwise fall back to GITHUB_TOKEN.
+      # Note: some orgs block PR creation with GITHUB_TOKEN, so PAT is recommended.
+      GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -19,10 +23,6 @@ jobs:
           ref: release
 
       - name: Ensure PR label exists
-        env:
-          # Use a fine-grained PAT with repo permissions because the default GITHUB_TOKEN
-          # cannot create PRs in this repository's policy setup.
-          GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
         run: |
           gh label create "automated" \
             --color BFD4F2 \
@@ -30,8 +30,6 @@ jobs:
 
       - name: Create PR from release to master
         id: create_pr
-        env:
-          GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
         run: |
           PR_URL=$(gh pr create \
             --base master \
@@ -44,8 +42,6 @@ jobs:
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
 
       - name: Enable auto-merge for PR
-        env:
-          GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
         run: |
           PR_NUMBER=$(echo "${{ steps.create_pr.outputs.pr_url }}" | sed 's/.*\/pull\/\([0-9]*\)/\1/')
           echo "PR Number: $PR_NUMBER"
