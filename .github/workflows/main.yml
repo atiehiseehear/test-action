@@ -27,15 +27,25 @@ jobs:
             echo "PR already exists: #$EXISTING_PR"
             echo "pull-request-number=$EXISTING_PR" >> $GITHUB_OUTPUT
           else
-            PR_URL=$(gh pr create \
+            # Try to create PR, handle case where branches are in sync
+            if PR_URL=$(gh pr create \
               --base master \
               --head release \
               --title "chore: sync release into master" \
               --body "Automated sync of release into master." \
-              --label automated)
-            PR_NUMBER=$(echo $PR_URL | grep -oP '\d+$')
-            echo "pull-request-number=$PR_NUMBER" >> $GITHUB_OUTPUT
-            echo "Created new PR: #$PR_NUMBER"
+              --label automated 2>&1); then
+              PR_NUMBER=$(echo $PR_URL | grep -oP '\d+$')
+              echo "pull-request-number=$PR_NUMBER" >> $GITHUB_OUTPUT
+              echo "Created new PR: #$PR_NUMBER"
+            else
+              if echo "$PR_URL" | grep -q "No commits between"; then
+                echo "Branches are already in sync - no PR needed"
+                exit 0
+              else
+                echo "Error creating PR: $PR_URL"
+                exit 1
+              fi
+            fi
           fi
         id: pr
 
