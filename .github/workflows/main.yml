@@ -6,55 +6,49 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: write # required to add labels to PRs in many repos
 
 jobs:
-  sync_to_master:
-    name: Sync release -> master
+  merge_release_to_master:
+    name: Merge release -> master
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout release
+      - name: Checkout master
         uses: actions/checkout@v4
         with:
-          ref: release
+          ref: master
           fetch-depth: 0
 
-      - name: Create PR (if missing) and enable auto-merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure Git
         run: |
-          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          BASE="master"
-          HEAD="release"
-          TITLE="chore: sync release into master"
-          BODY="Automated sync of release into master after production deploy."
-          LABEL="automated"
+      - name: Create sync branch and merge release
+        id: merge
+        run: |
+          BRANCH_NAME="sync-release-to-master-$(date +%s)"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          git checkout -b $BRANCH_NAME
+          git merge origin/release --no-edit
 
-          # 1) Find existing open PR from release -> master (if any)
-          PR_URL=$(gh pr list \
-            --base "$BASE" \
-            --head "$HEAD" \
-            --state open \
-            --json url \
-            --jq '.[0].url' || true)
+      - name: Create PR
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: master
+          branch: ${{ steps.merge.outputs.branch_name }}
+          title: 'chore: sync release into master'
+          body: |
+            Automated sync of release into master.
+          labels: |
+            automated
 
-          # 2) If no PR exists, create it
-          if [ -z "${PR_URL:-}" ] || [ "${PR_URL:-null}" = "null" ]; then
-            echo "No open PR found. Creating one..."
-            PR_URL=$(gh pr create \
-              --base "$BASE" \
-              --head "$HEAD" \
-              --title "$TITLE" \
-              --body "$BODY" \
-              --label "$LABEL")
-            echo "Created PR: $PR_URL"
-          else
-            echo "Found existing PR: $PR_URL"
-          fi
-
-          # 3) Enable auto-merge (merge commit)
-          # This will merge only after branch protection requirements pass.
-          gh pr merge "$PR_URL" --auto --merge
-          echo "Auto-merge enabled for: $PR_URL"
+      - name: Enable auto-merge
+        if: ${{ steps.cpr.outputs.pull-request-number != null && steps.cpr.outputs.pull-request-number != '' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: merge
