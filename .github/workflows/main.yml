@@ -20,7 +20,9 @@ jobs:
 
       - name: Ensure PR label exists
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use a fine-grained PAT with repo permissions because the default GITHUB_TOKEN
+          # cannot create PRs in this repository's policy setup.
+          GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
         run: |
           gh label create "automated" \
             --color BFD4F2 \
@@ -29,7 +31,7 @@ jobs:
       - name: Create PR from release to master
         id: create_pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
         run: |
           PR_URL=$(gh pr create \
             --base master \
@@ -43,7 +45,7 @@ jobs:
 
       - name: Enable auto-merge for PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PR_AUTOMATION_TOKEN }}
         run: |
           PR_NUMBER=$(echo "${{ steps.create_pr.outputs.pr_url }}" | sed 's/.*\/pull\/\([0-9]*\)/\1/')
           echo "PR Number: $PR_NUMBER"
