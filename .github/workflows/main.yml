@@ -6,6 +6,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write # required to add labels to PRs in many repos
 
 jobs:
   sync_to_master:
@@ -13,26 +14,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout release
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Important: Need full history to compare branches
+          ref: release
+          fetch-depth: 0
 
-      - name: Create and Auto-Merge PR
+      - name: Create PR (if missing) and enable auto-merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. Create the PR directly from release to master
-          # We capture the PR URL to use it in the next step
-          PR_URL=$(gh pr create \
-            --base master \
-            --head release \
-            --title "chore: sync release into master" \
-            --body "Automated sync of release into master after production deploy." \
-            --label "automated")
-          
-          echo "Created PR: $PR_URL"
+          set -euo pipefail
 
-          # 2. Enable Auto-Merge for this PR
-          # This tells GitHub to merge it as soon as any checks pass
+          BASE="master"
+          HEAD="release"
+          TITLE="chore: sync release into master"
+          BODY="Automated sync of release into master after production deploy."
+          LABEL="automated"
+
+          # 1) Find existing open PR from release -> master (if any)
+          PR_URL=$(gh pr list \
+            --base "$BASE" \
+            --head "$HEAD" \
+            --state open \
+            --json url \
+            --jq '.[0].url' || true)
+
+          # 2) If no PR exists, create it
+          if [ -z "${PR_URL:-}" ] || [ "${PR_URL:-null}" = "null" ]; then
+            echo "No open PR found. Creating one..."
+            PR_URL=$(gh pr create \
+              --base "$BASE" \
+              --head "$HEAD" \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --label "$LABEL")
+            echo "Created PR: $PR_URL"
+          else
+            echo "Found existing PR: $PR_URL"
+          fi
+
+          # 3) Enable auto-merge (merge commit)
+          # This will merge only after branch protection requirements pass.
           gh pr merge "$PR_URL" --auto --merge
+          echo "Auto-merge enabled for: $PR_URL"
