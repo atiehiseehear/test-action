@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   direct_sync:
@@ -40,17 +41,62 @@ jobs:
             echo "sync_needed=true" >> $GITHUB_OUTPUT
             
             echo "Commits in release but not in master:"
-            git log master..release --oneline
+            COMMITS=$(git log master..release --oneline)
+            echo "$COMMITS"
+
+            {
+              echo "commits<<EOF"
+              echo "$COMMITS"
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
           fi
 
-      - name: Sync release to master
+      - name: Create sync branch from release
         if: steps.check_diff.outputs.sync_needed == 'true'
+        id: create_branch
         run: |
-          # Checkout master and merge release
-          git checkout master
-          git merge release --no-ff -m "chore: sync release to master [automated]"
+          SYNC_BRANCH="bot/sync-release-to-master-$(date +%Y%m%d-%H%M%S)"
 
-          # Push the updated master branch
-          git push origin master
+          git checkout -B "$SYNC_BRANCH" release
+          git push -f origin "$SYNC_BRANCH"
 
-          echo "✅ Successfully synced release to master!"
+          echo "sync_branch=$SYNC_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Create PR from sync branch to master
+        if: steps.check_diff.outputs.sync_needed == 'true'
+        id: pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: master
+          head: ${{ steps.create_branch.outputs.sync_branch }}
+          title: "🔄 Sync release to master"
+          body: |
+            Automated sync PR created from the `release` branch into `master`.
+
+            **Commits included:**
+            ```
+            ${{ steps.check_diff.outputs.commits }}
+            ```
+
+            **Source branch:** ${{ steps.create_branch.outputs.sync_branch }}
+          labels: |
+            automated
+            sync
+          delete-branch: true
+
+      - name: Enable auto-merge (respects branch protection)
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.pr.outputs.pull-request-number }}
+          merge-method: merge
+        continue-on-error: true
+
+      - name: Summary
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+        run: |
+          echo "PR created: #${{ steps.pr.outputs.pull-request-number }}"
+          echo "PR URL: ${{ steps.pr.outputs.pull-request-url }}"
+          echo "If auto-merge is blocked by branch protection, please review and approve/merge the PR manually."
