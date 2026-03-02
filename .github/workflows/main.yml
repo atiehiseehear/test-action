@@ -31,19 +31,22 @@ jobs:
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
           git checkout -b $BRANCH_NAME
           git merge origin/release --no-edit
+          git push origin $BRANCH_NAME
 
       - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base master \
+            --head ${{ steps.merge.outputs.branch_name }} \
+            --title "chore: sync release into master" \
+            --body "Automated sync of release into master." \
+            --label automated \
+            --json number \
+            --jq '.number' > pr_number.txt
+          echo "pull-request-number=$(cat pr_number.txt)" >> $GITHUB_OUTPUT
         id: cpr
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: master
-          branch: ${{ steps.merge.outputs.branch_name }}
-          title: 'chore: sync release into master'
-          body: |
-            Automated sync of release into master.
-          labels: |
-            automated
 
       - name: Enable auto-merge
         if: ${{ steps.cpr.outputs.pull-request-number != null && steps.cpr.outputs.pull-request-number != '' }}
