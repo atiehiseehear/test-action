@@ -1,22 +1,10 @@
 name: Sync Release to Master
 
+# Trigger: Manual workflow dispatch
 on:
   workflow_dispatch:
-    inputs:
-      version_type:
-        description: 'Version bump type'
-        required: false
-        default: 'patch'
-        type: choice
-        options:
-          - major
-          - minor
-          - patch
-      custom_version:
-        description: 'Custom version (e.g., 1.2.3) - overrides version_type'
-        required: false
-        type: string
 
+# Required permissions for creating PRs and releases
 permissions:
   contents: write
   pull-requests: write
@@ -27,9 +15,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
+      # Step 2: Create or find existing PR from release branch to master
       - name: Create PR from release to master
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,6 +55,7 @@ jobs:
           fi
         id: pr
 
+      # Step 3: Enable auto-merge on the PR
       - name: Enable auto-merge
         if: ${{ steps.pr.outputs.pull-request-number != '' }}
         env:
@@ -70,44 +63,7 @@ jobs:
         run: |
           gh pr merge ${{ steps.pr.outputs.pull-request-number }} --auto --merge
 
-      - name: Calculate next version
-        if: ${{ steps.pr.outputs.pull-request-number != '' || github.event.inputs.custom_version != '' }}
-        id: version
-        run: |
-          # Get latest tag, default to v0.0.0 if none exists
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "Latest tag: $LATEST_TAG"
-          
-          # Use custom version if provided
-          if [ -n "${{ github.event.inputs.custom_version }}" ]; then
-            NEW_VERSION="v${{ github.event.inputs.custom_version }}"
-          else
-            # Remove 'v' prefix and split version
-            VERSION=${LATEST_TAG#v}
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-            
-            # Increment based on version type
-            case "${{ github.event.inputs.version_type }}" in
-              major)
-                MAJOR=$((MAJOR + 1))
-                MINOR=0
-                PATCH=0
-                ;;
-              minor)
-                MINOR=$((MINOR + 1))
-                PATCH=0
-                ;;
-              patch)
-                PATCH=$((PATCH + 1))
-                ;;
-            esac
-            
-            NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-          fi
-          
-          echo "New version: $NEW_VERSION"
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-
+      # Step 4: Wait for the PR to be automatically merged (up to 5 minutes)
       - name: Wait for PR to be merged
         if: ${{ steps.pr.outputs.pull-request-number != '' }}
         env:
@@ -127,23 +83,21 @@ jobs:
             sleep 10
           done
           
-          echo "PR not merged within timeout, will create tag anyway"
+          echo "PR not merged within timeout"
+          exit 1
 
-      - name: Create GitHub Release
-        if: ${{ steps.version.outputs.version != '' }}
+      # Step 5: Validate PR merge
+      - name: Validate PR merge
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch --all
-          git checkout master
-          git pull origin master
+          PR_NUMBER=${{ steps.pr.outputs.pull-request-number }}
+          STATE=$(gh pr view $PR_NUMBER --json state --jq '.state')
           
-          # Create and push tag
-          git tag ${{ steps.version.outputs.version }}
-          git push origin ${{ steps.version.outputs.version }}
+          if [ "$STATE" != "MERGED" ]; then
+            echo "ERROR: PR #$PR_NUMBER is not merged (state: $STATE)"
+            exit 1
+          fi
           
-          # Create GitHub release
-          gh release create ${{ steps.version.outputs.version }} \
-            --title "Release ${{ steps.version.outputs.version }}" \
-            --notes "Automated release from sync of release branch to master" \
-            --target master
+          echo "✓ PR #$PR_NUMBER successfully merged"
