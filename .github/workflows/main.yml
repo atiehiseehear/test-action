@@ -64,7 +64,7 @@ jobs:
 
       - name: Create release/YYYY-MM-DD Branch
         run: |
-          NEW_BRANCH="release-prod-${{ steps.vars.outputs.DATE }}"
+          NEW_BRANCH="release-${{ steps.vars.outputs.DATE }}"
           git checkout -b $NEW_BRANCH
           git push origin $NEW_BRANCH
 
@@ -74,7 +74,7 @@ jobs:
         with:
           payload: |
             {
-              "text": ":rocket: *Production Phase Started*\n\n`devtest` has been merged into `release`.\nNew branch created: `release/${{ steps.vars.outputs.DATE }}`\n\nAll production fixes should now target this branch."
+              "text": ":rocket: *Production Phase Started*\n\n`devtest` has been merged into `release`.\nNew branch created: `release-${{ steps.vars.outputs.DATE }}`\n\nAll production fixes should now target this branch."
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
