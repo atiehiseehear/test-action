@@ -22,7 +22,18 @@ jobs:
         id: vars
         run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
+      - name: Check for differences
+        id: diff_check
+        run: |
+          if git diff --quiet origin/release origin/devtest; then
+            echo "HAS_DIFF=false" >> $GITHUB_OUTPUT
+            echo "No differences between release and devtest. Skipping PR creation."
+          else
+            echo "HAS_DIFF=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create PR devtest -> release
+        if: steps.diff_check.outputs.HAS_DIFF == 'true'
         id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -37,6 +48,7 @@ jobs:
           echo "PR_URL=$PR_URL" >> $GITHUB_OUTPUT
 
       - name: Auto Merge PR
+        if: steps.diff_check.outputs.HAS_DIFF == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
