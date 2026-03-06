@@ -52,7 +52,7 @@ jobs:
 
       - name: Create release/YYYY-MM-DD Branch
         run: |
-          NEW_BRANCH="release/${{ steps.vars.outputs.DATE }}"
+          NEW_BRANCH="release-prod-${{ steps.vars.outputs.DATE }}"
           git checkout -b $NEW_BRANCH
           git push origin $NEW_BRANCH
 
