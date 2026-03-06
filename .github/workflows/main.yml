@@ -1,27 +1,32 @@
-name: Start Production Phase
+# Workflow: Release & Devtest Sync
+# Triggered manually to sync devtest into release and create a dated release branch.
+name: Release & Devtest Sync
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Manual trigger only (no automatic triggers)
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: write      # Needed to push branches
+  pull-requests: write # Needed to create and merge PRs
 
 jobs:
   start_prod_phase:
-    name: Start Prod Phase
+    name: Sync & Create Release Branch
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Clone the repo with full history so we can compare branches
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # Step 2: Store today's date (YYYY-MM-DD) for naming the release branch later
       - name: Set Date Variable
         id: vars
         run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
+      # Step 3: Compare release and devtest branches; skip PR creation if they are identical
       - name: Check for differences
         id: diff_check
         run: |
@@ -32,6 +37,7 @@ jobs:
             echo "HAS_DIFF=true" >> $GITHUB_OUTPUT
           fi
 
+      # Step 4: Open a PR to merge devtest into release (only if there are changes)
       - name: Create PR devtest -> release
         if: steps.diff_check.outputs.HAS_DIFF == 'true'
         id: create_pr
@@ -47,6 +53,7 @@ jobs:
 
           echo "PR_URL=$PR_URL" >> $GITHUB_OUTPUT
 
+      # Step 5: Immediately merge the PR using admin privileges to bypass branch protections
       - name: Auto Merge PR
         if: steps.diff_check.outputs.HAS_DIFF == 'true'
         env:
@@ -56,25 +63,28 @@ jobs:
             --merge \
             --admin
 
+      # Step 6: Fetch and switch to the updated release branch locally
       - name: Pull Latest Release
         run: |
           git fetch origin
           git checkout release
           git pull origin release
 
+      # Step 7: Create a new dated branch (e.g. release-2026-03-06) from release for production fixes
       - name: Create release/YYYY-MM-DD Branch
         run: |
           NEW_BRANCH="release-${{ steps.vars.outputs.DATE }}"
           git checkout -b $NEW_BRANCH
           git push origin $NEW_BRANCH
 
+      # Step 8: Send a Slack notification summarizing what happened
       - name: Notify Slack
         if: success()
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
             {
-              "text": ":rocket: *Production Phase Started*\n\n`devtest` has been merged into `release`.\nNew branch created: `release-${{ steps.vars.outputs.DATE }}`\n\nAll production fixes should now target this branch."
+              "text": ":rocket: *Production Phase Started*\n\n`devtest` has been merged into `release`.\nNew branch created: `release-${{ steps.vars.outputs.DATE }}`\n\nAll remaining changes for this release should target this branch."
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
