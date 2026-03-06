@@ -1,103 +1,68 @@
-name: Sync Release to Master
+name: Start Production Phase
 
-# Trigger: Manual workflow dispatch
 on:
   workflow_dispatch:
 
-# Required permissions for creating PRs and releases
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  merge_release_to_master:
-    name: Merge release -> master
+  start_prod_phase:
+    name: Start Prod Phase
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Step 2: Create or find existing PR from release branch to master
-      - name: Create PR from release to master
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Check if PR already exists
-          EXISTING_PR=$(gh pr list --base master --head release --json number --jq '.[0].number' || echo "")
-          
-          if [ -n "$EXISTING_PR" ]; then
-            echo "PR already exists: #$EXISTING_PR"
-            echo "pull-request-number=$EXISTING_PR" >> $GITHUB_OUTPUT
-          else
-            # Try to create PR, handle case where branches are in sync
-            if PR_URL=$(gh pr create \
-              --base master \
-              --head release \
-              --title "chore: sync release into master" \
-              --body "Automated sync of release into master." \
-              --label automated 2>&1); then
-              PR_NUMBER=$(echo $PR_URL | grep -oP '\d+$')
-              echo "pull-request-number=$PR_NUMBER" >> $GITHUB_OUTPUT
-              echo "Created new PR: #$PR_NUMBER"
-            else
-              if echo "$PR_URL" | grep -q "No commits between"; then
-                echo "Branches are already in sync - no PR needed"
-                exit 0
-              else
-                echo "Error creating PR: $PR_URL"
-                exit 1
-              fi
-            fi
-          fi
-        id: pr
+      - name: Set Date Variable
+        id: vars
+        run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-      # Step 3: Enable auto-merge on the PR
-      - name: Enable auto-merge
-        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+      - name: Create PR devtest -> release
+        id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr merge ${{ steps.pr.outputs.pull-request-number }} --auto --merge
+          PR_URL=$(gh pr create \
+            --base release \
+            --head devtest \
+            --title "chore: sync devtest into release for prod" \
+            --body "Automated PR to move devtest into release before production phase." \
+            --label "automated")
 
-      # Step 4: Wait for the PR to be automatically merged (up to 5 minutes)
-      - name: Wait for PR to be merged
-        if: ${{ steps.pr.outputs.pull-request-number != '' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER=${{ steps.pr.outputs.pull-request-number }}
-          echo "Waiting for PR #$PR_NUMBER to be merged..."
-          
-          # Wait up to 5 minutes for PR to merge
-          for i in {1..30}; do
-            STATE=$(gh pr view $PR_NUMBER --json state --jq '.state')
-            if [ "$STATE" = "MERGED" ]; then
-              echo "PR merged successfully!"
-              exit 0
-            fi
-            echo "PR state: $STATE - waiting... ($i/30)"
-            sleep 10
-          done
-          
-          echo "PR not merged within timeout"
-          exit 1
+          echo "PR_URL=$PR_URL" >> $GITHUB_OUTPUT
 
-      # Step 5: Validate PR merge
-      - name: Validate PR merge
-        if: ${{ steps.pr.outputs.pull-request-number != '' }}
+      - name: Auto Merge PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR_NUMBER=${{ steps.pr.outputs.pull-request-number }}
-          STATE=$(gh pr view $PR_NUMBER --json state --jq '.state')
-          
-          if [ "$STATE" != "MERGED" ]; then
-            echo "ERROR: PR #$PR_NUMBER is not merged (state: $STATE)"
-            exit 1
-          fi
-          
-          echo "✓ PR #$PR_NUMBER successfully merged"
+          gh pr merge "${{ steps.create_pr.outputs.PR_URL }}" \
+            --merge \
+            --admin
+
+      - name: Pull Latest Release
+        run: |
+          git fetch origin
+          git checkout release
+          git pull origin release
+
+      - name: Create release/YYYY-MM-DD Branch
+        run: |
+          NEW_BRANCH="release/${{ steps.vars.outputs.DATE }}"
+          git checkout -b $NEW_BRANCH
+          git push origin $NEW_BRANCH
+
+      - name: Notify Slack
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": ":rocket: *Production Phase Started*\n\n`devtest` has been merged into `release`.\nNew branch created: `release/${{ steps.vars.outputs.DATE }}`\n\nAll production fixes should now target this branch."
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
