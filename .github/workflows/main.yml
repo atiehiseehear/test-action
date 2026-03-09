@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # Manual trigger only (no automatic triggers)
 
 permissions:
-  contents: write      # Needed to push branches
+  contents: write # Needed to push branches
   pull-requests: write # Needed to create and merge PRs
 
 jobs:
@@ -53,15 +53,16 @@ jobs:
 
           echo "PR_URL=$PR_URL" >> $GITHUB_OUTPUT
 
-      # Step 5: Immediately merge the PR using admin privileges to bypass branch protections
-      - name: Auto Merge PR
-        if: steps.diff_check.outputs.HAS_DIFF == 'true'
+      # Step 5: Enable Auto-merge for the PR (only if it was created)
+      - name: Enable Auto-merge on PR
+        if: steps.create_pr.outputs.PR_URL
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr merge "${{ steps.create_pr.outputs.PR_URL }}" \
-            --merge \
-            --admin
+          PR_NUMBER=$(echo "${{ steps.create_pr.outputs.PR_URL }}" | awk -F'/' '{print $NF}')
+          gh pr merge $PR_NUMBER --auto --squash --repo ${{ github.repository }}
+          echo "Enabled auto-merge for PR #$PR_NUMBER"
+          echo "PR_MERGED=true" >> $GITHUB_OUTPUT
 
       # Step 6: Fetch and switch to the updated release branch locally
       - name: Pull Latest Release
@@ -72,10 +73,20 @@ jobs:
 
       # Step 7: Create a new dated branch (e.g. release-2026-03-06) from release for production fixes
       - name: Create release/YYYY-MM-DD Branch
+        id: create_branch
         run: |
           NEW_BRANCH="release-${{ steps.vars.outputs.DATE }}"
-          git checkout -b $NEW_BRANCH
-          git push origin $NEW_BRANCH
+          
+          # Check if branch already exists locally or remotely
+          if git show-ref --verify --quiet refs/heads/$NEW_BRANCH || git show-ref --verify --quiet refs/remotes/origin/$NEW_BRANCH; then
+            echo "Branch $NEW_BRANCH already exists. Skipping branch creation."
+            echo "BRANCH_ACTION=skipped" >> $GITHUB_OUTPUT
+          else
+            echo "Branch $NEW_BRANCH doesn't exist. Creating new branch."
+            git checkout -b $NEW_BRANCH
+            git push origin $NEW_BRANCH
+            echo "BRANCH_ACTION=created" >> $GITHUB_OUTPUT
+          fi
 
       # Step 8: Send a Slack notification summarizing what happened
       - name: Notify Slack
@@ -84,7 +95,7 @@ jobs:
         with:
           payload: |
             {
-              "text": ":rocket: *Production Phase Started*\n\n`devtest` has been merged into `release`.\nNew branch created: `release-${{ steps.vars.outputs.DATE }}`\n\nAll remaining changes for this release should target this branch."
+              "text": ":rocket: *Production Phase Started* (`streamcell-frontend`)\n\n`devtest` has been merged into `release`.\nRelease branch `release-${{ steps.vars.outputs.DATE }}` ${{ steps.create_branch.outputs.BRANCH_ACTION == 'created' && 'created' || 'already exists' }}.\n\nAll remaining changes for this release should target this branch."
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
